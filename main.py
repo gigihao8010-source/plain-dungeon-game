@@ -29,9 +29,6 @@ SAVE_FILE = "sword_save.json"
 
 GROUND_TOP = 150
 
-# Put your hosted online server address here later.
-ONLINE_SERVER_URL = "wss://CHANGE-ME.example.com"
-
 # ============================================================
 # COLORS
 # ============================================================
@@ -7863,28 +7860,23 @@ async def player_name_screen(force=False):
         await asyncio.sleep(0)
 
 
-async def lan_ip_screen():
-    typed = "127.0.0.1"
-
+async def server_address_screen(title, default_value, help_text):
+    typed = default_value
     while True:
         screen.fill((18, 18, 32))
-        draw_center("JOIN LAN SERVER", 100, BIG, GOLD)
-        draw_center("Enter the host computer's LAN IP address.", 165, SMALL)
-
-        box = pygame.Rect(330, 235, 440, 60)
+        draw_center(title, 100, BIG, GOLD)
+        draw_center(help_text, 165, SMALL)
+        box = pygame.Rect(180, 235, 740, 60)
         pygame.draw.rect(screen, (35, 35, 55), box)
         pygame.draw.rect(screen, GOLD, box, 3)
-        surf = FONT.render(typed, True, WHITE)
-        screen.blit(surf, (box.x + 15, box.y + 16))
-
-        draw_center("Example: 192.168.1.25", 320, SMALL)
-        draw_center("ENTER = connect     ESC = back", 355, SMALL)
+        shown = typed[-70:]
+        surf = SMALL.render(shown, True, WHITE)
+        screen.blit(surf, (box.x + 12, box.y + 19))
+        draw_center("ENTER = connect     ESC = back", 335, SMALL)
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return None
-
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return None
@@ -7892,11 +7884,27 @@ async def lan_ip_screen():
                     return typed.strip()
                 if event.key == pygame.K_BACKSPACE:
                     typed = typed[:-1]
-                elif event.unicode in "0123456789." and len(typed) < 15:
+                elif event.unicode and event.unicode.isprintable() and len(typed) < 180:
                     typed += event.unicode
-
         clock.tick(FPS)
         await asyncio.sleep(0)
+
+
+async def lan_ip_screen():
+    address = await server_address_screen(
+        "JOIN LAN SERVER",
+        "ws://127.0.0.1:5050",
+        "Same PC: ws://127.0.0.1:5050   Other PC: ws://LAN-IP:5050"
+    )
+    return address
+
+
+async def online_server_screen():
+    return await server_address_screen(
+        "ONLINE SERVER",
+        "wss://YOUR-SERVICE.onrender.com",
+        "Paste your Render WebSocket address (wss://...onrender.com)"
+    )
 
 
 def draw_lan_remote_player(p, camera):
@@ -8006,7 +8014,7 @@ def draw_lan_remote_player(p, camera):
 
 
 async def lan_game(host_ip):
-    """LAN V3: real Level 1 gameplay + local enemy combat + synced players."""
+    """Multiplayer adventure: works through WebSocket on desktop and browser."""
     try:
         reader, writer = await asyncio.wait_for(
             open_game_connection(host_ip, 5050),
@@ -8706,14 +8714,14 @@ async def lan_game(host_ip):
         )
 
         draw_center(
-            "LAN V3 - " + data["name"],
+            "MULTIPLAYER - " + data["name"],
             160,
             FONT,
             CYAN
         )
 
         draw_text(
-            f"ONLINE: {online_here}   {host_ip}:5050",
+            f"ONLINE: {online_here}   {host_ip}",
             790,
             118,
             SMALL,
@@ -9118,7 +9126,7 @@ async def pvp_arena(host_ip, queue_mode):
         # ---------------- DRAW ----------------
         screen.fill((12, 14, 24))
         pygame.draw.rect(screen, (18, 21, 34), (0, 0, WIDTH, 175))
-        draw_center("LAN PVP ARENA", 28, BIG, GOLD)
+        draw_center("MULTIPLAYER PVP ARENA", 28, BIG, GOLD)
 
         if not in_match and won is None:
             needed = 2 if queue_mode == "1v1" else 4
@@ -9317,7 +9325,7 @@ async def pvp_arena(host_ip, queue_mode):
 async def pvp_menu(host_ip):
     while True:
         screen.fill((18, 18, 32))
-        draw_center("ONLINE PVP" if str(host_ip).startswith(("ws://", "wss://")) else "LAN PVP", 58, BIG, GOLD)
+        draw_center("LAN PVP", 58, BIG, GOLD)
         draw_center(
             f"Character: {player_data.get('character','Knight')}   "
             f"Arrow: {player_data.get('arrow_type','regular')}",
@@ -9367,16 +9375,11 @@ async def pvp_menu(host_ip):
 
 
 async def lan_hub(host_ip):
-    """Multiplayer home screen for either LAN or online play."""
-    is_online = str(host_ip).startswith(("ws://", "wss://"))
-
+    """LAN home screen. Connecting no longer drops you straight into a level."""
     while True:
         screen.fill((18, 18, 32))
-        draw_center("ONLINE SERVER" if is_online else "LAN SERVER", 65, HUGE, GOLD)
-        if is_online:
-            draw_center("Connected to " + host_ip, 135, SMALL, CYAN)
-        else:
-            draw_center("Connected to " + host_ip + ":5050", 135, SMALL, CYAN)
+        draw_center("LAN SERVER", 65, HUGE, GOLD)
+        draw_center("Connected to " + host_ip, 135, SMALL, CYAN)
 
         adventure_button = Button(380, 205, 340, 55, "CO-OP ADVENTURE")
         pvp_button = Button(380, 280, 340, 55, "PVP ARENA")
@@ -9389,7 +9392,7 @@ async def lan_hub(host_ip):
         back_button.draw()
 
         draw_center(
-            "Choose Adventure or PvP.",
+            "Choose what you want to do on the LAN server.",
             520,
             SMALL,
             WHITE
@@ -9413,68 +9416,34 @@ async def lan_hub(host_ip):
         await asyncio.sleep(0)
 
 
-async def online_setup_message():
-    while True:
-        screen.fill((18, 18, 32))
-        draw_center("ONLINE SERVER NOT SET YET", 150, BIG, GOLD)
-        draw_center("First host online_server.py on the internet.", 235, FONT, WHITE)
-        draw_center("Then put its wss:// address in ONLINE_SERVER_URL", 280, SMALL, CYAN)
-        draw_center("inside main.py.", 310, SMALL, CYAN)
-        draw_center("Press ESC or click BACK", 390, SMALL, WHITE)
-
-        back_button = Button(380, 455, 340, 55, "BACK")
-        back_button.draw()
-        pygame.display.flip()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return
-            if back_button.clicked(event):
-                return
-
-        clock.tick(FPS)
-        await asyncio.sleep(0)
-
-
 async def lan_menu():
+    # Kept this function name so older menu code still works.
     while True:
         screen.fill((18, 18, 32))
         draw_center("MULTIPLAYER", 70, BIG, GOLD)
-
-        join_button = Button(380, 180, 340, 55, "CONNECT TO LAN SERVER")
-        online_button = Button(380, 250, 340, 55, "ONLINE MULTIPLAYER")
-        name_button = Button(380, 320, 340, 55, "CHANGE PLAYER NAME")
-        back_button = Button(380, 390, 340, 55, "BACK")
-
-        join_button.draw()
-        online_button.draw()
-        name_button.draw()
-        back_button.draw()
-
-        draw_center("LAN = same Wi-Fi", 485, SMALL, WHITE)
-        draw_center("Online = players can connect over the internet", 515, SMALL, GOLD)
-
+        local_button = Button(380, 175, 340, 55, "LAN / SAME COMPUTER")
+        online_button = Button(380, 245, 340, 55, "ONLINE (RENDER)")
+        name_button = Button(380, 315, 340, 55, "CHANGE PLAYER NAME")
+        back_button = Button(380, 385, 340, 55, "BACK")
+        local_button.draw(); online_button.draw(); name_button.draw(); back_button.draw()
+        draw_center("Browser LAN now uses WebSocket too.", 485, SMALL, CYAN)
+        draw_center("Render uses a secure wss:// address.", 515, SMALL, GOLD)
         pygame.display.flip()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return
-            if join_button.clicked(event):
-                ip = await lan_ip_screen()
-                if ip:
-                    await lan_hub(ip)
+            if local_button.clicked(event):
+                address = await lan_ip_screen()
+                if address:
+                    await lan_hub(address)
             elif online_button.clicked(event):
-                if "CHANGE-ME" in ONLINE_SERVER_URL:
-                    await online_setup_message()
-                else:
-                    await lan_hub(ONLINE_SERVER_URL)
+                address = await online_server_screen()
+                if address and "YOUR-SERVICE" not in address:
+                    await lan_hub(address)
             elif name_button.clicked(event):
                 await player_name_screen(True)
             elif back_button.clicked(event):
                 return
-
         clock.tick(FPS)
         await asyncio.sleep(0)
 
