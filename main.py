@@ -1,5 +1,6 @@
 import pygame
 import asyncio
+import sys
 from online_net import open_game_connection
 import random
 import json
@@ -7862,6 +7863,20 @@ async def player_name_screen(force=False):
 
 async def server_address_screen(title, default_value, help_text):
     typed = default_value
+    is_browser = sys.platform == "emscripten"
+    edit_button = pygame.Rect(350, 325, 400, 52)
+
+    def browser_prompt(current):
+        # The browser's native text box supports typing, Ctrl+V, and select-all.
+        try:
+            import platform
+            answer = platform.window.prompt("Enter server WebSocket address:", current)
+            if answer is None:
+                return current
+            return str(answer).strip()
+        except Exception:
+            return current
+
     while True:
         screen.fill((18, 18, 32))
         draw_center(title, 100, BIG, GOLD)
@@ -7872,17 +7887,27 @@ async def server_address_screen(title, default_value, help_text):
         shown = typed[-70:]
         surf = SMALL.render(shown, True, WHITE)
         screen.blit(surf, (box.x + 12, box.y + 19))
-        draw_center("ENTER = connect     ESC = back", 335, SMALL)
+        if is_browser:
+            pygame.draw.rect(screen, (45, 95, 145), edit_button, border_radius=8)
+            draw_center("CLICK HERE TO TYPE / PASTE", 341, SMALL, WHITE)
+            draw_center("ENTER = connect     ESC = back", 410, SMALL)
+        else:
+            draw_center("CTRL+A = replace     ENTER = connect     ESC = back", 335, SMALL)
         pygame.display.flip()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return None
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if is_browser and (edit_button.collidepoint(event.pos) or box.collidepoint(event.pos)):
+                    typed = browser_prompt(typed)
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return None
-                if event.key == pygame.K_RETURN:
+                if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     return typed.strip()
-                if event.key == pygame.K_BACKSPACE:
+                if event.key == pygame.K_a and (event.mod & pygame.KMOD_CTRL):
+                    typed = ""
+                elif event.key == pygame.K_BACKSPACE:
                     typed = typed[:-1]
                 elif event.unicode and event.unicode.isprintable() and len(typed) < 180:
                     typed += event.unicode
@@ -8013,7 +8038,7 @@ def draw_lan_remote_player(p, camera):
     pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 1)
 
 
-async def lan_game(host_ip):
+async def lan_game(host_ip, room_id="official"):
     """Multiplayer adventure: works through WebSocket on desktop and browser."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -8069,7 +8094,7 @@ async def lan_game(host_ip):
     my_name = str(player_data.get("player_name", "Player"))[:14]
     my_character = player_data.get("character", "Knight")
 
-    writer.write(f"HELLO|{my_name}|{my_character}\n".encode())
+    writer.write(f"HELLO|{my_name}|{my_character}|{room_id}\n".encode())
     await writer.drain()
 
     my_id = None
@@ -8108,6 +8133,8 @@ async def lan_game(host_ip):
             if not msg:
                 continue
 
+            if msg[0] == "ROOMERROR":
+                return
             if msg[0] == "WELCOME" and len(msg) >= 2:
                 my_id = msg[1]
 
@@ -8780,7 +8807,7 @@ async def lan_game(host_ip):
         pass
 
 
-async def pvp_arena(host_ip, queue_mode):
+async def pvp_arena(host_ip, queue_mode, room_id="official"):
     """LAN PvP V3: real arrows, class abilities, character selection, server-owned HP."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -8802,7 +8829,7 @@ async def pvp_arena(host_ip, queue_mode):
 
     my_name = str(player_data.get("player_name", "Player"))[:14]
     my_character = player_data.get("character", "Knight")
-    writer.write(f"HELLO|{my_name}|{my_character}\n".encode())
+    writer.write(f"HELLO|{my_name}|{my_character}|{room_id}\n".encode())
     await writer.drain()
 
     my_id = None
@@ -8877,6 +8904,8 @@ async def pvp_arena(host_ip, queue_mode):
             if not msg:
                 continue
 
+            if msg[0] == "ROOMERROR":
+                return
             if msg[0] == "WELCOME" and len(msg) >= 2:
                 my_id = msg[1]
 
@@ -9322,7 +9351,7 @@ async def pvp_arena(host_ip, queue_mode):
         pass
 
 
-async def pvp_menu(host_ip):
+async def pvp_menu(host_ip, room_id="official"):
     while True:
         screen.fill((18, 18, 32))
         draw_center("LAN PVP", 58, BIG, GOLD)
@@ -9362,9 +9391,9 @@ async def pvp_menu(host_ip):
             if event.type == pygame.QUIT:
                 return
             if duel_button.clicked(event):
-                await pvp_arena(host_ip, "1v1")
+                await pvp_arena(host_ip, "1v1", room_id)
             elif team_button.clicked(event):
-                await pvp_arena(host_ip, "2v2")
+                await pvp_arena(host_ip, "2v2", room_id)
             elif character_button.clicked(event):
                 await character_select()
             elif back_button.clicked(event):
@@ -9374,7 +9403,7 @@ async def pvp_menu(host_ip):
         await asyncio.sleep(0)
 
 
-async def lan_hub(host_ip):
+async def lan_hub(host_ip, room_id="official"):
     """LAN home screen. Connecting no longer drops you straight into a level."""
     while True:
         screen.fill((18, 18, 32))
@@ -9404,14 +9433,174 @@ async def lan_hub(host_ip):
             if event.type == pygame.QUIT:
                 return
             if adventure_button.clicked(event):
-                await lan_game(host_ip)
+                await lan_game(host_ip, room_id)
             elif pvp_button.clicked(event):
-                await pvp_menu(host_ip)
+                await pvp_menu(host_ip, room_id)
             elif name_button.clicked(event):
                 await player_name_screen(True)
             elif back_button.clicked(event):
                 return
 
+        clock.tick(FPS)
+        await asyncio.sleep(0)
+
+
+
+# -------- Player-created server rooms (hosted by the connected server) --------
+def display_server_name(name):
+    name = str(name).strip()
+    return name if name.lower().endswith(" server") else name + " Server"
+
+
+def room_owner_token():
+    token = str(player_data.get("room_owner_token", ""))
+    if not token:
+        token = str(random.getrandbits(120))
+        player_data["room_owner_token"] = token
+        try:
+            save_game()
+        except Exception:
+            pass
+    return token
+
+
+async def room_request(host, command):
+    try:
+        reader, writer = await asyncio.wait_for(open_game_connection(host, 5050), timeout=8)
+        writer.write((command + "\n").encode())
+        await writer.drain()
+        result = []
+        for _ in range(110):
+            line = await asyncio.wait_for(reader.readline(), timeout=8)
+            if not line:
+                break
+            value = line.decode(errors="replace").strip()
+            result.append(value)
+            if value == "ROOMEND" or value.startswith(("ROOMCREATED|", "ROOMERROR|")):
+                break
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        return ["ROOMERROR|" + str(exc)[:90]]
+
+
+async def room_text_input(title, initial=""):
+    return await server_address_screen(title, initial, "Type a name, then press ENTER")
+
+
+async def room_browser(host, kind="world"):
+    token = room_owner_token()
+    while True:
+        command = "ROOMLIST" if kind == "world" else "ROOMMINE|" + token
+        replies = await room_request(host, command)
+        entries = []
+        error = ""
+        for line in replies:
+            parts = line.split("|")
+            if len(parts) >= 6 and parts[0] == "ROOM":
+                entries.append(parts[1:6])
+            elif parts[0] == "ROOMERROR":
+                error = parts[1] if len(parts) > 1 else "Connection error"
+        screen.fill((18,18,32))
+        draw_center("WORLD SERVERS" if kind == "world" else "MY SERVERS", 65, BIG, GOLD)
+        draw_center("Click a server to join. ESC = Back", 115, SMALL, CYAN)
+        buttons = []
+        for i, room in enumerate(entries[:7]):
+            rid, name, count, limit, visibility = room
+            btn = Button(175, 165 + i*66, 750, 52, f"{display_server_name(name)[:28]}   {count}/{limit}   {visibility}")
+            btn.draw()
+            buttons.append((btn, rid))
+        if error:
+            draw_center(error[:85], 600, SMALL, RED)
+        elif not entries:
+            draw_center("No servers found.", 365, SMALL)
+        pygame.display.flip()
+        while True:
+            clicked = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return
+                for btn, rid in buttons:
+                    if btn.clicked(event):
+                        await lan_hub(host, rid)
+                        clicked = True
+                        break
+            if clicked:
+                break
+            clock.tick(FPS)
+            await asyncio.sleep(0)
+
+
+async def create_server_screen(host):
+    name = await room_text_input("CREATE SERVER - NAME", "My Adventure World")
+    if not name:
+        return
+    if "|" in name:
+        name = name.replace("|", "")
+    name = display_server_name(name)
+    while True:
+        screen.fill((18,18,32))
+        draw_center("CREATE SERVER", 95, BIG, GOLD)
+        draw_center("Server: " + name[:42], 165, SMALL, CYAN)
+        public = Button(340, 245, 420, 65, "CREATE PUBLIC SERVER")
+        private = Button(340, 330, 420, 65, "CREATE PRIVATE SERVER")
+        back = Button(340, 415, 420, 65, "BACK")
+        public.draw(); private.draw(); back.draw()
+        draw_center("Public = listed in World Servers", 520, SMALL)
+        draw_center("Private = only accessible by its server ID", 550, SMALL)
+        pygame.display.flip()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or back.clicked(event):
+                return
+            if public.clicked(event) or private.clicked(event):
+                visibility = "PUBLIC" if public.rect.collidepoint(event.pos) else "PRIVATE"
+                response = await room_request(host, f"ROOMCREATE|{name}|{visibility}|{room_owner_token()}|8")
+                result = response[0] if response else "ROOMERROR|No response"
+                if result.startswith("ROOMCREATED|"):
+                    rid = result.split("|", 1)[1]
+                    await lan_hub(host, rid)
+                    return
+                await room_text_input("CREATE FAILED", result.split("|",1)[-1][:60])
+                return
+        clock.tick(FPS)
+        await asyncio.sleep(0)
+
+
+async def multiplayer_server_menu():
+    host = await online_server_screen()
+    if not host or "YOUR-SERVICE" in host:
+        return
+    while True:
+        screen.fill((18,18,32))
+        draw_center("MULTIPLAYER SERVERS", 75, BIG, GOLD)
+        world = Button(345, 170, 410, 55, "WORLD SERVERS")
+        mine = Button(345, 245, 410, 55, "MY SERVERS")
+        create = Button(345, 320, 410, 55, "CREATE SERVER")
+        join = Button(345, 395, 410, 55, "JOIN BY SERVER ID")
+        back = Button(345, 470, 410, 55, "BACK")
+        for b in (world,mine,create,join,back):
+            b.draw()
+        draw_center("Official and public community servers", 565, SMALL, CYAN)
+        pygame.display.flip()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or back.clicked(event):
+                return
+            if world.clicked(event):
+                await room_browser(host, "world")
+            elif mine.clicked(event):
+                await room_browser(host, "mine")
+            elif create.clicked(event):
+                await create_server_screen(host)
+            elif join.clicked(event):
+                rid = await room_text_input("SERVER ID", "")
+                if rid:
+                    await lan_hub(host, rid.strip())
         clock.tick(FPS)
         await asyncio.sleep(0)
 
@@ -9437,9 +9626,7 @@ async def lan_menu():
                 if address:
                     await lan_hub(address)
             elif online_button.clicked(event):
-                address = await online_server_screen()
-                if address and "YOUR-SERVICE" not in address:
-                    await lan_hub(address)
+                await multiplayer_server_menu()
             elif name_button.clicked(event):
                 await player_name_screen(True)
             elif back_button.clicked(event):
